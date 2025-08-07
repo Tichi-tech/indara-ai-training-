@@ -1,0 +1,111 @@
+# Clone AudioCraft
+git clone https://github.com/facebookresearch/audiocraft.git
+cd audiocraft
+
+# Install AudioCraft in editable mode
+pip install -e .
+
+# Install required libraries
+pip install torchaudio flashy dora omegaconf einops julius soundfile tqdm
+
+audiocraft/data/wavs/
+
+import os, json, random
+from pathlib import Path
+
+AUDIO_DIR = Path("data/wavs")
+MANIFEST_DIR = Path("data/manifest")
+MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+
+all_files = list(AUDIO_DIR.glob("*.wav"))
+random.shuffle(all_files)
+
+split = int(0.8 * len(all_files))  # 80% train, 20% valid
+
+def make_manifest(files):
+    return [{"path": str(f), "duration": 30.0} for f in files]
+
+with open(MANIFEST_DIR / "train.json", "w") as f:
+    json.dump(make_manifest(all_files[:split]), f, indent=2)
+
+with open(MANIFEST_DIR / "valid.json", "w") as f:
+    json.dump(make_manifest(all_files[split:]), f, indent=2)
+
+print(f"✅ Created manifest: {len(all_files[:split])} train, {len(all_files[split:])} valid")
+✅ Option 1: Use VS Code Remote Upload (Easiest GUI)
+If you're already using VS Code (which Jarvis supports):
+🔁 Steps:
+1.	Click the "VS Code" button from your JarvisLabs instance (from the dashboard)
+2.	It will launch Visual Studio Code in the browser, connected to your instance.
+3.	In the file sidebar:
+o	Right-click a folder (or create a new one inside audiocraft/data/)
+o	Choose Upload…
+o	Select your merged_audio folder or .wav files from your Mac
+o	Upload them directly (drag-and-drop also works in most setups)
+✅ That's it — no command line needed.
+Initial Setup
+
+  - Environment: AudioCraft repo on A100 GPU with Docker container
+  - Goal: Train custom EnCodec model on 1300+ 32kHz meditation audio files
+
+  Key Issues & Solutions
+
+  1. Config Structure
+
+  Problem: Wrong config format and location
+  Solution: Created proper solver config at config/solver/compression/encodec_custom_32khz.yaml
+
+  2. Data Format
+
+  Problem: AudioCraft expects JSONL format, not JSON arrays
+  Solution:
+  # Convert JSON array to JSONL (one object per line)
+  python3 -c "import json; data=json.load(open('/home/audiocraft/data/train.json')); [print(json.dumps(item)) for item in 
+  data]" > train.jsonl
+
+  3. Missing Required Fields
+
+  Problem: AudioCraft needs sample_rate field in each entry
+  Solution:
+  sed 's/"duration": 30.0/"duration": 30.0, "sample_rate": 32000/g' train.json > train_fixed.jsonl
+
+  4. Data Split
+
+  Problem: Need separate train/validation sets
+  Solution:
+  - Train: 1000 files
+  - Valid: 200+ files
+
+  5. Multiprocessing Issues
+
+  Problem: Docker container incompatible with PyTorch DataLoader workers
+  Solution: dataset.num_workers=0 (single-threaded loading)
+
+  6. Memory Management
+
+  Problem: Initial GPU memory errors
+  Solution: dataset.batch_size=16 (conservative for stability)
+
+  Final Working Command
+
+  cd ~/audiocraft
+  python -m audiocraft.train solver=compression/encodec_custom_32khz dataset.num_workers=0 dataset.batch_size=16
+
+  Final Config File
+
+  # @package __global__
+  defaults:
+    - compression/default
+    - /model: encodec/encodec_large_nq4_s640
+    - override /dset: audio/default
+    - _self_
+channels: 1
+  sample_rate: 32000
+
+  datasource:
+    max_sample_rate: 32000
+    max_channels: 1
+    train: /home/audiocraft/data/train.json
+    valid: /home/audiocraft/data/valid.json
+    evaluate: /home/audiocraft/data/valid.json
+    generate: null
