@@ -83,3 +83,41 @@ If possible, move the training to a native or cluster environment where the mult
 Monitor upstream development: The AudioCraft and Dora teams are aware of this scenario from community feedback, but a robust fix has not been released as of August 2025.
 
 Custom hacking: Advanced users might attempt dangerous hacks—such as directly editing logs/checkpoint metadata or patching experiment signatures—but these are not officially supported and could corrupt your training.
+
+the solution code:
+nano audiocraft/conf/compression/encodec_custom_32khz.yaml
+dataset:
+  num_workers: 0
+  batch_size: 16  # Or 32, if you have enough memory
+
+evaluate:
+  num_workers: 0
+
+generate:
+  every: 0
+  num_workers: 0
+
+datasource:
+  generate: null
+  evaluate: /home/audiocraft/data/valid.json
+  train: /home/audiocraft/data/train.json
+  valid: /home/audiocraft/data/valid.json
+  max_sample_rate: 32000
+  max_channels: 1
+
+channels: 1
+sample_rate: 32000
+
+optim:
+  updates_per_epoch: 300
+
+defaults:
+  - compression/default
+  - /model: encodec/encodec_large_nq4_s640
+  - override /dset: audio/default
+  - _self_
+
+and save and run:
+export USER=root
+python -m audiocraft.train solver=compression/encodec_custom_32khz continue_from=/home/audiocraft/saved_models/encodec_force_epoch25.th
+
