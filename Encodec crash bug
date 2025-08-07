@@ -1,0 +1,85 @@
+ AudioCraft EnCodec Training Bug Summary
+
+  Bug Description
+
+  AudioCraft training crashes consistently at every 25th epoch during checkpoint saving/evaluation phase in Docker 
+  containers.
+
+  Root Cause
+
+  Docker multiprocessing incompatibility - AudioCraft uses Python multiprocessing for checkpoint saving and evaluation,
+  but Docker containers have process isolation that breaks multiprocessing workers.
+
+  Exact Failure Pattern
+
+  1. Training progresses normally through epochs 1-24
+  2. At Epoch 25 (checkpoint milestone):
+    - Training completes successfully
+    - Model metrics are excellent (L1=0.037, Mel=0.573)
+    - Evaluation phase starts and may complete
+    - Crash occurs during multiprocessing cleanup
+  3. Error: IndexError: list index out of range in multiprocessing spawn workers
+  4. Critical insight: Model is actually SAVED successfully before crash
+
+  Why This Happens
+
+  - Epoch 25, 50, 75, 100, etc. trigger major checkpoint saves (save_every: 25)
+  - These use multiprocessing for evaluation/generation phases
+  - Docker's process isolation prevents proper worker spawning
+  - Multiprocessing workers fail during cleanup, not training
+
+  Impact
+
+  - Training progress IS preserved - model saves before crash
+  - Quality metrics are excellent at crash point
+  - Restart cycle every 25 epochs required to reach full training
+  - 8 manual restarts needed for 200-epoch training (25→50→75→100→125→150→175→200)
+
+  Workarounds Tested
+
+  1. ❌ Environment variables: TORCH_MULTIPROCESSING_SHARING_STRATEGY, PYTORCH_CUDA_ALLOC_CONF
+  2. ❌ Config modifications: Adding num_workers=0 breaks experiment signature
+  3. ❌ Manual checkpoint loading: Dora's experiment system prevents proper resuming
+  4. ✅ Accept restart cycle: Only reliable solution - manual restart every 25 epochs
+
+  Core Issue
+
+  AudioCraft/Dora experiment system is poorly designed for Docker environments - combines fragile multiprocessing with
+  overly strict experiment signature matching that prevents simple checkpoint resuming.
+
+  Status
+
+  Bug is a fundamental architectural issue - would require AudioCraft core changes to fix properly. Workaround is
+  functional but inconvenient.
+
+solution:
+Why the Training Always Restarts at Epoch 25
+Checkpoint Creation: At every 25th epoch, AudioCraft saves a major checkpoint. If a crash occurs after checkpointing (for example, during the evaluation or multiprocessing worker cleanup), the last successfully saved checkpoint corresponds to epoch 25 (and not 26+).
+
+Resume Behavior: When you restart, AudioCraft loads this most recent checkpoint (epoch 25) and repeats the 25th epoch. Because the underlying issue (multiprocessing crash in Docker) is tied to this checkpointing/evaluation phase, the process will always crash again at this spot, never advancing to 26 or beyond.
+
+Dora Experiment Signature: Dora’s strict experiment signature controls mean you cannot simply hack your way to skipping the problematic checkpoint or trick the system into starting from epoch 26—in effect, you are stuck in a checkpoint-crash-restart loop every 25 epochs.
+
+Why Is This Happening?
+The checkpoint is written before the evaluation/multiprocessing crash happens, but the experiment state is never “completed/advanced” past that checkpoint. When you resume, you return to that same saved state, do the work again, crash at cleanup, and repeat.
+
+Implications
+Progress cannot advance beyond the crash point through normal resuming. You are always loading the last good checkpoint, immediately hitting the same bug.
+
+Is There a Solution?
+Currently, there is no clean user-level fix to get past this loop in Docker:
+
+Workarounds like changing num_workers, environment variables, or manual checkpoint edits do not reliably force the system to jump to the next epoch or skip the problematic phase.
+
+This is a core design/compatibility failure and would require major changes to how AudioCraft saves, resumes, and tracks experiment progress under multiprocessing in Docker.
+
+The only workaround for some users is to run in a non-Docker environment (bare-metal, VM, or a cluster system like Slurm), where process forking is handled differently and this bug may not manifest.
+
+What Can You Do Now?
+You cannot automatically or manually “advance” past epoch 25 in Docker using current AudioCraft versions. Each resume will repeat the crashing behavior.
+
+If possible, move the training to a native or cluster environment where the multiprocessing bug isn’t triggered, and resume from the last good checkpoint.
+
+Monitor upstream development: The AudioCraft and Dora teams are aware of this scenario from community feedback, but a robust fix has not been released as of August 2025.
+
+Custom hacking: Advanced users might attempt dangerous hacks—such as directly editing logs/checkpoint metadata or patching experiment signatures—but these are not officially supported and could corrupt your training.
