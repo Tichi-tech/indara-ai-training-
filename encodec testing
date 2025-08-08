@@ -1,0 +1,120 @@
+cat > ~/test_encodec_roundtrip.py << 'EOF'
+#!/usr/bin/env python3
+import os, sys, torch, torchaudio
+from typing import Dict, Any
+sys.path.insert(0, '/home/audiocraft')
+
+CKPT = "/home/audiocraft/saved_models/encodec_90epochs_best.th"
+AUDIO = "/home/audiocraft/data/wavs/wav/audio_export_2025-08-04 6-7_741hz-frequency-ambient-music-meditationcalmingzenspiritual-music-237780_chunk_8_175s-205s.wav"
+OUT   = "/home/audiocraft/test_reconstructed_epoch90.wav"
+
+def build_model_from_cfg(model_cfg: Dict[str, Any]):
+    """
+    Try multiple ways to build a CompressionModel from Audiocraft 1.4.x.
+    """
+    # 1) Newer-style builders
+    try:
+        from audiocraft.models.builders import get_compression_model
+        return get_compression_model(model_cfg)
+    except Exception:
+        pass
+    # 2) Older-style factory
+    try:
+        from audiocraft.models.encodec import CompressionModel
+        if hasattr(CompressionModel, "from_config"):
+            return CompressionModel.from_config(model_cfg)
+    except Exception:
+        pass
+    # 3) Direct constructor fallback
+    from audiocraft.models.encodec import CompressionModel
+    try:
+        return CompressionModel(model_cfg)
+    except Exception as e:
+        raise RuntimeError(f"Could not build CompressionModel from cfg. Last error: {e}")
+
+def extract_state(pkg: Dict[str, Any]):
+    """
+    Pull model weights from common flashy checkpoint layouts.
+    """
+    for k in ["best_state", "ema_state", "state", "model"]:
+        if k in pkg and isinstance(pkg[k], dict):
+            cand = pkg[k].get("model", pkg[k])
+            if isinstance(cand, dict):
+                return cand
+    # Flat state_dict
+    if isinstance(pkg, dict) and all(isinstance(v, torch.Tensor) for v in pkg.values()):
+        return pkg
+    raise RuntimeError(f"Couldn't find weights in checkpoint. Keys: {list(pkg.keys())[:12]}")
+
+def main():
+    if not os.path.exists(CKPT):
+        raise FileNotFoundError(f"Checkpoint not found: {CKPT}")
+    if not os.path.exists(AUDIO):
+        raise FileNotFoundError(f"Audio not found: {AUDIO}")
+
+    print(f"🔄 Loading checkpoint: {CKPT}")
+    pkg = torch.load(CKPT, map_location="cpu")
+
+    # Get hydra config for the model
+    if "xp.cfg" not in pkg:
+        raise RuntimeError("Checkpoint missing 'xp.cfg' (Hydra config). Save your training checkpoint with config included.")
+    cfg = pkg["xp.cfg"]
+    model_cfg = cfg.get("model", cfg)  # some saves store model cfg under 'model'
+
+    # Build model from cfg and load weights
+    model = build_model_from_cfg(model_cfg)
+    state = extract_state(pkg)
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    print(f"✅ Weights loaded (strict=False). Missing={len(missing)} Unexpected={len(unexpected)}")
+    if missing:   print("   ↪ missing (sample):", missing[:5])
+    if unexpected:print("   ↪ unexpected (sample):", unexpected[:5])
+
+    # Device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device).eval()
+
+    # Load audio
+    print(f"🔊 Loading: {AUDIO}")
+    wav, sr = torchaudio.load(AUDIO)
+    if wav.shape[0] > 1:
+        wav = wav.mean(0, keepdim=True)  # mono
+    if sr != 32000:
+        print(f"↪ Resampling {sr} → 32000 Hz")
+        wav = torchaudio.transforms.Resample(sr, 32000)(wav)
+        sr = 32000
+
+    wav = wav.unsqueeze(0).to(device)  # [B,C,T]
+
+    # Encode/Decode — handle both API signatures
+    with torch.no_grad():
+        print("🎛️  Encoding…")
+        enc_out = model.encode(wav)
+        if isinstance(enc_out, tuple) and len(enc_out) == 2:
+            codes, scale = enc_out
+            print("🎚️  Decoding…")
+            recon = model.decode(codes, scale)
+        else:
+            frames = enc_out  # e.g., list of dicts
+            print("🎚️  Decoding…")
+            recon = model.decode(frames)
+
+    recon = recon.squeeze(0).cpu()  # [C,T]
+
+    # Align & save
+    T = min(wav.shape[-1], recon.shape[-1])
+    orig = wav.squeeze(0).cpu()[:, :T]
+    recon = recon[:, :T]
+    torchaudio.save(OUT, recon, 32000)
+    print(f"✅ Wrote: {OUT}")
+
+    # Quick metrics
+    mse = torch.mean((orig - recon)**2).item()
+    snr = 10.0 * torch.log10((orig.pow(2).mean()) / (1e-12 + (orig - recon).pow(2).mean())).item()
+    print(f"📈 MSE: {mse:.6f} | SNR: {snr:.2f} dB")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+chmod +x ~/test_encodec_roundtrip.py
+python ~/test_encodec_roundtrip.py
