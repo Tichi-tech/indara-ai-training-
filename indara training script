@@ -109,3 +109,112 @@ channels: 1
     valid: /home/audiocraft/data/valid.json
     evaluate: /home/audiocraft/data/valid.json
     generate: null
+
+Reflection: From JSONL Upload to Solving Config & Compatibility Issues
+1. Uploading and Preparing Dataset Metadata (JSONL)
+You prepared your dataset metadata files (train_filtered.jsonl, valid_filtered.jsonl), describing audio samples.
+
+Verified the files exist and are accessible in the expected folder /home/audiocraft/data/wavs/metadata/.
+
+2. Understanding Config Namespace Conflicts (dset vs datasource)
+AudioCraft’s config system evolved over versions:
+
+Older versions use datasource.* keys at root.
+
+Newer versions use nested dset.datasource.* keys, with a dset config group.
+
+Mixing these namespaces in CLI overrides caused Hydra validation errors.
+
+3. Creating a Minimal Dataset Config YAML
+To avoid Hydra CLI parsing errors and ensure proper config loading, you created a small YAML config config/dset/audio/local.jsonl.yaml.
+
+This YAML explicitly defined all dataset paths and parameters:
+
+yaml
+Copy
+datasource:
+  max_sample_rate: 32000
+  max_channels: 1
+  train: /home/audiocraft/data/wavs/metadata/train_filtered.jsonl
+  valid: /home/audiocraft/data/wavs/metadata/valid_filtered.jsonl
+  evaluate: /home/audiocraft/data/wavs/metadata/valid_filtered.jsonl
+  generate: /home/audiocraft/data/wavs/metadata/valid_filtered.jsonl
+Then, referenced it via dset=audio/local.jsonl in your CLI call.
+
+4. Fixing Hydra/Dora CLI Parsing Limitations
+Dora’s Hydra wrapper does not support Hydra’s @file syntax for overrides.
+
+We switched from passing many CLI overrides to:
+
+Either expanding a file with xargs (which caused other errors).
+
+Or better, using a dedicated config YAML file for dataset paths.
+
+5. Solving the “GlobalHydra is already initialized” Error
+Error traced to resolve_checkpoint_path() importing audiocraft.train unconditionally.
+
+Importing audiocraft.train triggers a second Hydra initialization, which is forbidden.
+
+We patched resolve_checkpoint_path:
+
+Moved from audiocraft import train inside the conditional branch for //sig/ checkpoints only.
+
+This prevents re-import when loading local checkpoints, eliminating the double-init error.
+
+6. Verifying Config and Dataset Loading
+After the fix, the logs showed dataset metadata loading successfully.
+
+Now the training process proceeds to the model loading phase without config-related crashes.
+
+Step 1: Prepare Dataset Metadata YAML File
+Create a YAML config describing your dataset paths and parameters, so Hydra loads them properly:
+mkdir -p /home/audiocraft/config/dset/audio
+
+cat > /home/audiocraft/config/dset/audio/local.jsonl.yaml << 'EOF'
+# @package __global__
+datasource:
+  max_sample_rate: 32000
+  max_channels: 1
+  train: /home/audiocraft/data/wavs/metadata/train_filtered.jsonl
+  valid: /home/audiocraft/data/wavs/metadata/valid_filtered.jsonl
+  evaluate: /home/audiocraft/data/wavs/metadata/valid_filtered.jsonl
+  generate: /home/audiocraft/data/wavs/metadata/valid_filtered.jsonl
+EOF
+Step 2: Fix resolve_checkpoint_path to avoid double Hydra init
+Edit /home/audiocraft/audiocraft/utils/checkpoint.py:
+
+Find the function resolve_checkpoint_path and replace its body with this:
+def resolve_checkpoint_path(sig_or_path: tp.Union[Path, str], name: tp.Optional[str] = None,
+                            use_fsdp: bool = False) -> tp.Optional[Path]:
+    """Resolve a given checkpoint path for a provided dora sig or path."""
+    sig_or_path = str(sig_or_path)
+
+    if sig_or_path.startswith('//sig/'):
+        from audiocraft import train  # only import when needed to avoid Hydra double init
+        xps_root = train.main.dora.dir / 'xps'
+        sig = sig_or_path[len('//sig/'):]
+        path = xps_root / sig
+    else:
+        path = Path(sig_or_path)
+        path = AudioCraftEnvironment.resolve_reference_path(path)
+
+    if path.is_dir():
+        path = path / checkpoint_name(name, use_fsdp=use_fsdp)
+
+    return path if path.exists() else None
+Step 3: Run training command referencing the YAML config
+Use this CLI command without any datasource or dset overrides on CLI except pointing to your config:
+python -m audiocraft.train \
+  solver=musicgen/musicgen_base_32khz \
+  dset=audio/local.jsonl \
+  compression_model_checkpoint=/home/audiocraft/saved_models/encodec_90epochs_best.th \
+  dataset.batch_size=4 dataset.num_workers=0 \
+  optim.epochs=100 generate.every=10 evaluate.every=5
+Why this works:
+Dataset paths and required params are fully defined in the local.jsonl.yaml config file.
+
+Hydra loads this cleanly under dset=audio/local.jsonl, no CLI namespace clashes.
+
+resolve_checkpoint_path no longer triggers a double Hydra init since train import is conditional.
+
+Training script can now start smoothly loading dataset and checkpoint without config errors or double init errors.
