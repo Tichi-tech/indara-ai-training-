@@ -1,0 +1,39 @@
+back up
+# 1) Make a timestamped backup folder
+BACKUP=/home/backups/encodec_min_$(date +%Y%m%d_%H%M%S)
+mkdir -p "$BACKUP"
+
+# 2) Copy the critical bits
+cp -v /home/audiocraft/saved_models/encodec_90epochs_best.th "$BACKUP"/
+cp -v /home/audiocraft/saved_models/encodec_25epochs_checkpoint.th "$BACKUP"/ 2>/dev/null || true
+cp -vr /home/audiocraft/config "$BACKUP"/ 2>/dev/null
+cp -vr /home/audiocraft/logs "$BACKUP"/ 2>/dev/null
+cp -vr /home/audiocraft/tensorboard "$BACKUP"/ 2>/dev/null
+
+# 3) Freeze env + record repo version
+conda env export > "$BACKUP"/conda_env.yml 2>/dev/null || true
+pip freeze > "$BACKUP"/pip_freeze.txt
+( cd /home/audiocraft && git rev-parse HEAD > "$BACKUP"/audiocraft_git_commit.txt 2>/dev/null || true )
+( cd /home/audiocraft && git diff > "$BACKUP"/audiocraft_local_patches.diff 2>/dev/null || true )
+
+# 4) Save the exact resume command for future you
+echo "python -m audiocraft.train --config-dir config \
+  solver=compression/encodec_custom_32khz \
+  continue_from=/home/audiocraft/saved_models/encodec_90epochs_best.th" \
+  > "$BACKUP"/resume_command.txt
+
+echo "Backup at: $BACKUP"
+
+Restoring later
+When you’re ready to keep training with your new 10k+ dataset:
+# restore your environment
+conda env create -f conda_env.yml   # or pip install -r pip_freeze.txt
+
+# restore repo state (if needed)
+git checkout <hash in audiocraft_git_commit.txt>
+git apply audiocraft_local_patches.diff  # if not empty
+
+# resume training
+python -m audiocraft.train --config-dir config \
+  solver=compression/encodec_custom_32khz \
+  continue_from=/home/audiocraft/saved_models/encodec_90epochs_best.th
