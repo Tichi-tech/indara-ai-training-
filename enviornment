@@ -1,8 +1,21 @@
+# 1. Fresh conda env
 conda create -n acraft310 python=3.10 -y
 conda activate acraft310
 
-pip install torch==2.2.2+cu121 torchaudio==2.2.2+cu121 --index-url https://download.pytorch.org/whl/cu121
-pip install xformers==0.0.25.post1
-pip install safetensors==0.4.2 transformers==4.39.3
+# 2. Matching PyTorch stack (has torch.uint64)
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121
+
+# 3. Core dependencies
+pip install setuptools wheel packaging
 pip install flashy dora omegaconf einops julius soundfile tqdm
+
+# 4. Compatible transformers + safetensors
+pip install transformers==4.39.3 safetensors==0.3.3
+
+# 5. Clone AudioCraft
+git clone https://github.com/facebookresearch/audiocraft.git
+cd audiocraft
 pip install -e .
+
+# 6. ffmpeg (needed for audio I/O)
+sudo apt-get update && sudo apt-get install -y ffmpeg
