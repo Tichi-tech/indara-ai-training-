@@ -1,0 +1,16 @@
+cd /home/indara_safe/indara
+./start_server.sh
+
+# Download latest ngrok
+wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-linux-amd64.zip
+
+# Unzip
+unzip ngrok-stable-linux-amd64.zip
+
+# Move it to /usr/local/bin so it's globally available
+sudo mv ngrok /usr/local/bin/
+
+# Make sure it runs
+ngrok version
+
+ngrok http 7860
