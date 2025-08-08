@@ -1,0 +1,8 @@
+conda create -n acraft310 python=3.10 -y
+conda activate acraft310
+
+pip install torch==2.2.2+cu121 torchaudio==2.2.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+pip install xformers==0.0.25.post1
+pip install safetensors==0.4.2 transformers==4.39.3
+pip install flashy dora omegaconf einops julius soundfile tqdm
+pip install -e .
