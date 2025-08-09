@@ -1,0 +1,37 @@
+Text-to-Token Conditional Training
+
+Train or fine-tune your transformer model to generate discrete audio tokens (from a neural codec like EnCodec) conditioned on healing-themed text prompts.
+
+Use a dataset with labels or descriptions related to healing, calm, meditation, or wellness to bias the model toward this style.
+
+This step teaches the model to align text instructions with music token outputs that convey the healing mood.
+
+Curate or Collect Healing Music Data
+
+Gather or prepare a high-quality dataset of healing, ambient, meditative tracks with matching metadata or captions.
+
+The better your data aligns with healing music characteristics, the more vivid and authentic the generated compositions will be.
+
+Neural Codec (Decoder) Quality
+
+Ensure your neural codec decoder (like the EnCodec decoder) is well trained or fine-tuned to produce smooth, high-fidelity audio from tokens.
+
+This influences the audio realism and calmness needed for healing music.
+
+Prompt Engineering
+
+Develop and test rich text prompts that clearly express the desired healing qualities (e.g., “soft piano melody with gentle nature sounds and slow tempo”).
+
+Use prompt variations to explore the stylistic breadth of healing music generated.
+
+Post-Processing and Evaluation
+
+Optionally apply audio post-processing or mastering to further enhance relaxation qualities.
+
+Gather feedback from listeners or domain experts in healing music to iteratively refine model outputs and training data.
+
+Deployment and Use
+
+Integrate your model into an application or service where users can input healing-related text prompts and receive custom calming music tracks.
+
+Provide control options for tempo, instrumentation, and mood for personalized healing experiences.
