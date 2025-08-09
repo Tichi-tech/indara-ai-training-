@@ -218,3 +218,10 @@ Hydra loads this cleanly under dset=audio/local.jsonl, no CLI namespace clashes.
 resolve_checkpoint_path no longer triggers a double Hydra init since train import is conditional.
 
 Training script can now start smoothly loading dataset and checkpoint without config errors or double init errors.
+
+important metric: d-model and codeboos
+d_model: 512
+n_q: 4 (codebooks)
+card: 2048 (vocab size per codebook)
+frame_rate: 50
+tokens/sec: 200
