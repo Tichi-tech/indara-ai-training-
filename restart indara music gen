@@ -16,3 +16,17 @@ ngrok version
 ngrok http 7860
 
 /home/audiocraft/start_local.sh
+
+# 1) load conda
+source /root/miniconda3/etc/profile.d/conda.sh
+
+# 2) (optional) confirm the YAML exists
+ls -l /home/audiocraft/acraft310.env.yml
+
+# 3) recreate the env from your saved recipe
+conda env create -f /home/audiocraft/acraft310.env.yml
+
+# 4) activate and run
+conda activate acraft310
+export PYTHONPATH="/home/audiocraft:${PYTHONPATH:-}"
+python /home/audiocraft/load_and_generate.py
