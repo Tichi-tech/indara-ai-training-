@@ -46,3 +46,24 @@ restart the enviornment
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate acraft310
 cd ~/audiocraft
+
+  1. Find conda installation:
+  which conda
+  # or
+  find / -name "conda.sh" 2>/dev/null
+
+  2. Check available environments:
+  conda info --envs
+  # or
+  conda env list
+
+  3. Common conda paths to try:
+  # Try these paths:
+  source /opt/conda/etc/profile.d/conda.sh
+  source /root/miniconda3/etc/profile.d/conda.sh
+  source /usr/local/miniconda3/etc/profile.d/conda.sh
+
+⏺ Update Todos
+  ⎿  ☒ Check conda installation path      
+     ☒ Find the correct conda environment
+     ☒ Provide correct activation commands
