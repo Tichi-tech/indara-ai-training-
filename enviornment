@@ -55,3 +55,43 @@ torchaudio: 2.1.0+cu121
 torchvision: 0.16.0+cu121
 audiocraft version: 1.4.0a2
 xformers: 0.0.22.post7
+
+ 2. When You Want to Restart Later
+
+  Option A: If environment still exists
+  # Just reactivate
+  conda activate py3.10
+  cd ~/audiocraft
+
+  Option B: If environment was deleted/lost
+  # Recreate from the saved file
+  conda env create -f /home/audiocraft/audiocraft_env.yml
+
+  # The environment name is saved in the yml file (likely py3.10)
+  conda activate py3.10
+  cd ~/audiocraft
+
+  3. Also Save Your LoRA Training Progress
+
+  # Your LoRA adapter should already be saved at:
+  ls -la /home/audiocraft/saved_models/lora_epoch94_r8_alpha16.pt
+
+  # Optionally backup your training script and data paths
+  cp -r "/home/audiocraft/lora fine tune" /home/audiocraft/lora_backup/
+
+  4. Quick Restart Checklist
+
+  When you resume later:
+  # 1. Activate environment
+  conda activate py3.10
+
+  # 2. Navigate to audiocraft
+  cd ~/audiocraft
+
+  # 3. Test that your model still works
+  python ~/audiocraft/smoke_gen.py
+
+  # 4. Continue LoRA training if needed
+  cd "/home/audiocraft/lora fine tune"
+  python lora_train_jsonl.py
+
