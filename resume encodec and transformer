@@ -36,3 +36,34 @@ dora run -d . python -m audiocraft.train \
   sample_rate=32000 dataset.batch_size=4 \
   generate.lm.use_sampling=true generate.lm.top_k=250 \
   compression_model_checkpoint=/home/audiocraft/saved_models/repacked_encodec.th
+
+You also have custom configs:
+
+config/solver/compression/encodec_custom_32khz.yaml
+
+config/solver/musicgen/musicgen_custom.yaml
+
+EnCodec (compression) resume
+
+cd /home/audiocraft
+PYTHONPATH=. dora run -d . -- \
+python -m audiocraft.train \
+  solver=compression/encodec_custom_32khz \
+  continue_from=/home/audiocraft/saved_models/encodec_25epochs_checkpoint.th
+
+
+Alternative (without Dora, still fine—just creates local logs):
+
+cd /home/audiocraft
+PYTHONPATH=. python -m audiocraft.train \
+  solver=compression/encodec_custom_32khz \
+  continue_from=/home/audiocraft/saved_models/encodec_25epochs_checkpoint.th
+
+ransformer LM (MusicGen) resume (adapt the continue_from to your LM ckpt):
+
+cd /home/audiocraft
+PYTHONPATH=. dora run -d . -- \
+python -m audiocraft.train \
+  solver=musicgen/musicgen_custom \
+  compression_model_checkpoint=/home/audiocraft/saved_models/encodec_90epochs_best.th \
+  continue_from=/home/audiocraft/saved_models/transformer_epoch94/checkpoint_xxx.th
