@@ -1,0 +1,38 @@
+Short answer: yes — both the EnCodec and the Transformer LM are trained via the same entrypoint: audiocraft.train. The type of training is chosen by the solver:
+
+solver=compression → trains EnCodec (the audio compression model)
+
+solver=musicgen → trains the Transformer LM (MusicGen’s token LM)
+
+You already proved this from your own checkpoints’ xp.cfg:
+
+EnCodec file shows solver: compression
+
+LM file shows solver: musicgen
+
+Your LoRA fine-tune used your custom scripts (lora_train_jsonl.py / lora_infer.py) and does not use audiocraft.train. That’s only for full/base training.
+
+How to launch each (from your repo root)
+
+Important: run as a module and under dora (otherwise you hit “Not in a xp!”).
+
+conda activate py3.10
+cd /home/audiocraft
+
+# EnCodec training (compression)
+dora run -d . python -m audiocraft.train \
+  solver=compression \
+  datasource.train=/home/audiocraft/data/train.json \
+  datasource.valid=/home/audiocraft/data/valid.json \
+  sample_rate=32000 channels=1 \
+  dataset.batch_size=32 \
+  optim.epochs=200 optim.updates_per_epoch=300
+
+# Transformer LM (MusicGen LM)
+dora run -d . python -m audiocraft.train \
+  solver=musicgen \
+  datasource.train=/home/audiocraft/data/wavs/metadata/train_filtered.jsonl \
+  datasource.valid=/home/audiocraft/data/wavs/metadata/valid_filtered.jsonl \
+  sample_rate=32000 dataset.batch_size=4 \
+  generate.lm.use_sampling=true generate.lm.top_k=250 \
+  compression_model_checkpoint=/home/audiocraft/saved_models/repacked_encodec.th
