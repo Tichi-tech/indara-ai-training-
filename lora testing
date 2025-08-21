@@ -1,0 +1,2 @@
+cd "/home/audiocraft/lora fine tune"
+/root/miniconda3/envs/py3.10/bin/python lora_infer.py --prompt "warm ambient pad, evolving, soft reverb" --duration 30 --out gen_30s_prompt.wav
