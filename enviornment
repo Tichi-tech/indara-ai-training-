@@ -47,23 +47,11 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate acraft310
 cd ~/audiocraft
 
-  1. Find conda installation:
-  which conda
-  # or
-  find / -name "conda.sh" 2>/dev/null
+这是对的
+conda env create -f audiocraft_env.yml
 
-  2. Check available environments:
-  conda info --envs
-  # or
-  conda env list
-
-  3. Common conda paths to try:
-  # Try these paths:
-  source /opt/conda/etc/profile.d/conda.sh
-  source /root/miniconda3/etc/profile.d/conda.sh
-  source /usr/local/miniconda3/etc/profile.d/conda.sh
-
-⏺ Update Todos
-  ⎿  ☒ Check conda installation path      
-     ☒ Find the correct conda environment
-     ☒ Provide correct activation commands
+Torch: 2.1.0+cu121 CUDA: 12.1
+torchaudio: 2.1.0+cu121
+torchvision: 0.16.0+cu121
+audiocraft version: 1.4.0a2
+xformers: 0.0.22.post7
