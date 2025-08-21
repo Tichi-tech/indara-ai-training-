@@ -1,0 +1,49 @@
+import os
+import copy
+import torch
+from audiocraft.models import musicgen, loaders
+from audiocraft.data.audio import audio_write
+
+LM_SRC  = "/home/audiocraft/saved_models/transformer_epoch94/checkpoint_epoch94.th"
+ENC_SRC = "/home/audiocraft/saved_models/encodec_90epochs_best.th"
+
+LM_REPACK  = os.path.join(os.path.dirname(LM_SRC),  "repacked_lm.th")
+ENC_REPACK = os.path.join(os.path.dirname(ENC_SRC), "repacked_encodec.th")
+
+# Use a string for loaders
+device_str = "cuda" if torch.cuda.is_available() else "cpu"
+
+REQUIRE_XP_CFG = False  # set True to hard-fail when xp.cfg is missing
+
+
+def repack_for_loader(src_path: str, dst_path: str, tag: str):
+    pkg = torch.load(src_path, map_location="cpu")
+
+    # 1) Extract a flat state_dict
+    if isinstance(pkg, dict) and isinstance(pkg.get("best_state"), dict):
+        state = pkg["best_state"]
+        if isinstance(state.get("model"), dict):
+            state = state["model"]
+    elif isinstance(pkg, dict) and isinstance(pkg.get("model"), dict):
+        state = pkg["model"]
+    else:
+        # raw state_dict?
+        if isinstance(pkg, dict) and all(isinstance(k, str) for k in pkg.keys()):
+            state = pkg
+        else:
+            raise RuntimeError(f"[{tag}] Could not find flat state_dict. Top keys: {list(pkg.keys())[:10]}")
+
+    # 2) Preserve xp.cfg if present
+    new_pkg = {"best_state": state}
+    has_cfg = isinstance(pkg, dict) and "xp.cfg" in pkg
+    if has_cfg:
+        new_pkg["xp.cfg"] = copy.deepcopy(pkg["xp.cfg"])
+    else:
+        print(f"⚠️  [{tag}] WARNING: No xp.cfg found in {src_path}. "
+              f"Loaders may fail to reconstruct the architecture.")
+        if REQUIRE_XP_CFG:
+            raise RuntimeError(f"[{tag}] xp.cfg is required but missing.")
+
+    torch.save(new_pkg, dst_path)
+    print(f"✅ [{tag}] Repacked → {dst_path} | tensors: {len(state)} | has xp.cfg: {has_cfg}")
+    return has_cfg
