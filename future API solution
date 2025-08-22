@@ -1,0 +1,18 @@
+The two solid paths
+A) SageMaker Asynchronous Inference (managed, fastest to ship)
+
+Shape: API Gateway → Lambda (thin) → SageMaker Async Endpoint (GPU) → S3 → CloudFront.
+
+Good for: long-running renders (10–120s+), “I don’t want to run clusters.”
+
+You pay for: GPU instance hours (per endpoint replica), a small premium vs EC2, plus S3/CF/etc.
+
+Why teams pick it: dead-simple autoscaling, container loads once, jobs land in S3.
+
+B) EKS + SQS GPU workers (maximum control/lowest unit cost)
+
+Shape: API Gateway → Lambda (thin) → SQS → GPU workers on EKS (Karpenter autoscaling) → S3 → CloudFront.
+
+Good for: cost tuning, spot GPUs, custom batching/concurrency, multi-model routing.
+
+You pay for: EC2 GPU hours (often cheaper, esp. Spot), EKS control plane, SQS, plus S3/CF/etc.
