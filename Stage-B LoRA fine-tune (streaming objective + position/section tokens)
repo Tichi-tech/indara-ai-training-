@@ -1,0 +1,7 @@
+Recommended flow
+
+Train the base Transformer LM (done).
+
+Stage-B LoRA once (adds the capability: streaming objective + look-back + [POS]/[SEC]/[BPM]/[KEY]/[ENERGY] tokens).
+
+Style LoRA(s) as needed (adds aesthetics/domain).
