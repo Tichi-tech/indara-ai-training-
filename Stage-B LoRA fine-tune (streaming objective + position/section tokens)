@@ -5,3 +5,13 @@ Train the base Transformer LM (done).
 Stage-B LoRA once (adds the capability: streaming objective + look-back + [POS]/[SEC]/[BPM]/[KEY]/[ENERGY] tokens).
 
 Style LoRA(s) as needed (adds aesthetics/domain).
+
+
+How to keep your current pipeline safe (toggle-able)
+
+Implement the minimal dataloader change (add look-back frames; mask loss on look-back with ignore_index=-100). This doesn’t touch your model code.
+
+Train a separate Stage-B LoRA (the continuation capability). You can turn it on/off at inference. If you don’t like the effect, unload the adapter and you’re back to your current behavior.
+
+(Optional, later) Merge Stage-B into the base once you’re confident—again, a reversible step if you kept the old base checkpoint. 
+Hugging Face
