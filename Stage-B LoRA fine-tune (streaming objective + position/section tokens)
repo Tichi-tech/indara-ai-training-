@@ -15,3 +15,93 @@ Train a separate Stage-B LoRA (the continuation capability). You can turn it on/
 
 (Optional, later) Merge Stage-B into the base once you’re confident—again, a reversible step if you kept the old base checkpoint. 
 Hugging Face
+
+
+Here’s the whole plan after your metadata is ready—short, concrete, and in order.
+
+1) Train the Stage-B LoRA (adds the 5-min capability)
+
+What you already have: tracks.jsonl, segments.jsonl with 12-s windows, lookback_f=200, and tokens like [POS] [POS_BIN] [BPM] [KEY] [ENERGY] [FR].
+
+Dataloader (only change):
+
+Inputs: past+current codes → x = codes[:, :-1, :]
+
+Labels: next codes → y = codes[:, 1:, :]
+
+Mask loss on the first lookback_f-1 time steps (ignore_index = -100) so only the 12-s window is graded.
+
+Sum/avg cross-entropy across the 4 codebooks (unchanged model).
+
+LoRA setup: target q,k,v,o + MLP, rank r=8–16, α≈2r, dropout 0.05, AdamW (lr 5e-5 → 1.5e-4, wd 0.01), bf16/fp16.
+
+Data size: pick one
+
+Smoke: 1k windows (all 12 s), 2k–5k steps.
+
+Solid (rec’d): 10k windows (80% 12 s, 20% 30–60 s), 10k–20k steps.
+
+Strong: 30k windows (70% / 30%), 30k+ steps.
+
+What to watch: validation CE/PPL on 60–120 s continuations should drop vs. baseline.
+
+2) Generate a 5-minute track (single continuous decode)
+
+Chunking: 12 s per chunk (600 frames) with 4 s look-back (200 frames).
+
+KV priming: before each new chunk, feed the last 4 s of codes from the previous chunk into the model’s cache.
+
+Token schedule:
+
+start: [POS=START] (optionally [SEC=INTRO])
+
+middle: [POS_BIN=..] or your section tags
+
+end: [POS=END] (optionally [SEC=OUTRO])
+
+Sampling: start with top-k=250, temperature 1.0 (or top-p 0.95).
+
+Stitching: decode each chunk to waveform and crossfade 0.75–1.2 s; loudness-match around −16…−14 LUFS; prefer bar-aligned joins if you have bars.
+
+3) Check quality quickly (A/B)
+
+Generate 10–20 prompts in two modes:
+
+Baseline: your old 30-s chop/concat.
+
+Stage-B: streaming (12 s + 4 s look-back) + crossfade (and tokens).
+Expect Stage-B to have cleaner joins, steadier timbre, and a clearer intro/outro feel.
+
+4) Ship it (and keep ops simple)
+
+Serve: Base + Stage-B LoRA (+ optional Style LoRA).
+
+If happy: merge Stage-B into the base (bake in the continuation skill) and keep only Style LoRAs going forward. Keep a backup of the original base.
+
+5) Common pitfalls to avoid
+
+EnCodec mismatch (must be 32 kHz, 4 codebooks, 50 Hz across the board).
+
+Not masking the look-back region in the loss.
+
+Using seconds, not frames; always use frames = round(sec×50).
+
+Big loudness jumps at joins; always loudness-match before crossfade.
+
+Over-sampling a few long tracks; cap windows per track per epoch.
+
+One-page checklist
+
+ Metadata ready (segments.jsonl with start_f/end_f/lookback_f + tokens).
+
+ Dataloader shifts labels by +1 and masks look-back.
+
+ Stage-B LoRA trained on 12-s windows (+ some 30–60 s).
+
+ 5-min inference uses 12s/4s, KV look-back, 0.75–1.2 s crossfade.
+
+ A/B shows seam and drift improvements.
+
+ (Optional) Merge Stage-B into base; keep Style LoRAs modular.
+
+That’s the whole solution, end-to-end, with your existing EnCodec + Transformer pipeline.
