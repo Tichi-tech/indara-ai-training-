@@ -1,0 +1,140 @@
+Field-by-field: what it means + how to compute
+
+Assumptions (fixed for A):
+FPS = 50 frames/sec, window = 12 s → 600 frames, lookback = 4 s → 200 frames
+
+1) sample_id
+
+What: Unique id per 12-s segment.
+Format: "<track_key>_<start_f:06d>_<end_f:06d>"
+for <track_key>, Use the filename without extension, cleaned to be filesystem-safe.
+
+soft-piano-with-rain.wav → track_key = "soft-piano-with-rain"
+
+Codes file: codes/soft-piano-with-rain.codes.npz
+
+First 12s sample_id: soft-piano-with-rain_000000_000600
+Compute:
+
+start_f = i * 600
+
+end_f = start_f + 600
+
+Zero-pad both to 6 digits.
+
+2) start_f
+
+What: Start frame index of the 12-s window.
+Compute: start_f = i * 600 (since 12s × 50 fps = 600)
+
+3) end_f
+
+What: End frame (exclusive).
+Compute: end_f = start_f + 600
+
+4) lookback_f
+
+What: How much context (left side) the loader should include.
+Compute: lookback_f = 0 if i == 0 else 200 (4s × 50 fps)
+
+5) plan_tokens
+
+List of tiny tags the model sees.
+
+a) [FR=50HZ_NQ4]
+
+What: Fixed tokenizer spec (50 Hz, 4 codebooks).
+Compute: constant string.
+
+b) [POS=START|MID|END]
+
+What: Macro song position (intro/body/outro).
+Compute (training metadata, general track):
+Let track duration be T_f frames (T_s = T_f / 50 seconds). Use a simple 25/50/25 split by time midpoint of the window:
+
+mid_s = ((start_f + end_f)/2) / 50
+
+POS = START if mid_s < 0.25*T_s
+
+POS = MID if 0.25*T_s ≤ mid_s < 0.75*T_s
+
+POS = END if mid_s ≥ 0.75*T_s
+
+Compute (5-minute generation plan, 25 chunks):
+Index i = 0..24
+
+POS = START if i < 6
+
+POS = MID if 6 ≤ i < 19
+
+POS = END if i ≥ 19
+
+c) [POS_BIN=00..19]
+
+What: Coarse timeline bin (20 bins) or just a serial index—pick one and stay consistent.
+
+Recommended (coarse 20 bins across the piece):
+
+If you’re labeling a full track with n_chunks total chunks:
+bin = floor(20 * i / n_chunks) → clamp to 0..19
+
+For a fixed 5-min generation (25 chunks):
+bin = floor(20 * i / 25) → 0..19
+
+Format: zero-padded 2 digits: f"{bin:02d}"
+
+Worked example (20-minute track, 1200 s, n_chunks=100)
+
+Track frames: T_f = 1200 * 50 = 60,000
+
+Window frames: 600
+
+Lookback frames: 200
+
+Chunk i = 0 (0–12s)
+
+start_f = 0 * 600 = 0
+
+end_f = 0 + 600 = 600
+
+lookback_f = 0
+
+mid_s = (0+600)/2 / 50 = 300/50 = 6 s → in first 25% → POS=START
+
+POS_BIN = floor(20 * 0 / 100) = 0 → "00"
+
+sample_id = "mysong42_000000_000600"
+
+plan_tokens = ["[FR=50HZ_NQ4]","[POS=START]","[POS_BIN=00]"]
+
+Chunk i = 25 (300–312s)
+
+start_f = 25 * 600 = 15,000
+
+end_f = 15,600
+
+lookback_f = 200
+
+mid_s = (15000+15600)/2 / 50 = 15300/50 = 306 s → mid 50% → POS=MID
+
+POS_BIN = floor(20 * 25 / 100) = 5 → "05"
+
+sample_id = "mysong42_015000_015600"
+
+plan_tokens = ["[FR=50HZ_NQ4]","[POS=MID]","[POS_BIN=05]"]
+
+Chunk i = 99 (1188–1200s)
+
+start_f = 99 * 600 = 59,400
+
+end_f = 60,000
+
+lookback_f = 200
+
+mid_s = (59400+60000)/2 / 50 = 59700/50 = 1194 s → last 25% → POS=END
+
+POS_BIN = floor(20 * 99 / 100) = 19 → "19"
+
+sample_id = "mysong42_059400_060000"
+
+plan_tokens = ["[FR=50HZ_NQ4]","[POS=END]","[POS_BIN=19]"]
