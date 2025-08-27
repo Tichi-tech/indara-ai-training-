@@ -1,0 +1,2 @@
+cd "/home/audiocraft/lora fine tune"
+python lora_infer.py --prompt "friday morning next to the park with relaxtion music." --duration 30 --out gen_30s_prompt.wav
