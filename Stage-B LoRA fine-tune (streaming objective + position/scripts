@@ -1,0 +1,53 @@
+Sanity check with your known-good repack: python -c "from audiocraft.models.loaders import load_compression_model as L; L('/home/audiocraft/saved_models/repacked_encodec.th', device='cuda'); print('✅ EnCodec loaded (repacked)')"
+prepare encodec code: /home/audiocraft/Stage-B traning 5 minutes music/prepare_encodec_codes.py
+
+run this: 
+python "/home/audiocraft/Stage-B traning 5 minutes music/prepare_encodec_codes.py" \
+  --encodec_ckpt "/home/audiocraft/saved_models/repacked_encodec.th" \
+  --wav_root "/home/audiocraft/data/wavs/v1 stage-B wav" \
+  --out_chunks_root /home/audiocraft/data/codes_chunks/v1_stageB \
+  --out_codes_root /home/audiocraft/data/codes/v1_stageB \
+  --num_workers 8 \
+  --skip_tokenize_if_exists
+
+Normalize:
+python - <<'PY'
+import os, re, glob
+root = "/home/audiocraft/data/codes/v1_stageB"
+rx = re.compile(r"\s\(\d+\)$")  # matches " (1)", " (2)", etc. before extension
+renamed = 0
+for p in glob.glob(os.path.join(root, "*.codes.npz")):
+    base = os.path.basename(p)
+    stem = base[:-10]  # drop ".codes.npz"
+    newstem = rx.sub("", stem)  # strip trailing " (n)"
+    newbase = newstem + ".codes.npz"
+    if newbase != base:
+        os.rename(os.path.join(root, base), os.path.join(root, newbase))
+        renamed += 1
+print(f"Renamed {renamed} files")
+# re-write manifest
+with open(os.path.join(root, "expected_codes_filenames.txt"), "w") as f:
+    for name in sorted(os.listdir(root)):
+        if name.endswith(".codes.npz"):
+            f.write(name + "\n")
+print("Manifest refreshed.")
+PY
+
+rewrite script:
+/home/audiocraft/Stage-B traning 5 minutes music/rewrite_jsonl_codes_path.py
+run:
+python "/home/audiocraft/Stage-B traning 5 minutes music/rewrite_jsonl_codes_path.py" \
+  "/home/audiocraft/data/wavs/v1 stage-B metadata" \
+  "/home/audiocraft/data/metadata_fixed/v1_stageB" \
+  "/home/audiocraft/data/codes/v1_stageB" \
+  --show_samples 8
+
+set path:
+export METADATA_DIR="/home/audiocraft/data/metadata_fixed/v1_stageB_pruned"
+export CODES_DIR="/home/audiocraft/data/codes/v1_stageB"
+export CODES_MANIFEST="$CODES_DIR/expected_codes_filenames.txt"
+export ENCODEC_CKPT="/home/audiocraft/saved_models/repacked_encodec.th"
+export LM_CKPT="/home/audiocraft/saved_models/transformer_epoch94/repacked_lm.th"
+
+
+
