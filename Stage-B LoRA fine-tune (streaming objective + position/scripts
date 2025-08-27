@@ -54,11 +54,12 @@ python "/home/audiocraft/Stage-B traning 5 minutes music/train_stageB_lora.py" \
   --val_jsonl   "$METADATA_DIR/segments_stageB_val.jsonl" \
   --encodec_ckpt "$ENCODEC_CKPT" \
   --lm_ckpt "$LM_CKPT" \
-  --out_dir "/home/audiocraft/saved_models/stageB_lora_smoke" \
+  --out_dir "/home/audiocraft/saved_models/stageB_lora_full" \
   --lora_r 8 --lora_alpha 16 --lora_dropout 0.05 \
   --batch_size 12 --grad_accum 2 --lr 1e-4 --epochs 1 \
-  --max_steps 200 \
+  --max_steps 0 \
   --lookback_f 300
+
 
 
 
