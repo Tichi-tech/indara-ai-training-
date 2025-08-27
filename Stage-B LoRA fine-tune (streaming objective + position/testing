@@ -1,0 +1,15 @@
+path:/home/audiocraft/Stage-B traning 5 minutes music/test_stageB_lora_generate.py
+run:
+export LM_CKPT="/home/audiocraft/saved_models/transformer_epoch94/repacked_lm.th"
+export ENCODEC_CKPT="/home/audiocraft/saved_models/repacked_encodec.th"
+export LORA_PT="/home/audiocraft/saved_models/stageB_lora_full/lora_best.pt"
+
+python "/home/audiocraft/Stage-B traning 5 minutes music/test_stageB_lora_generate.py" \
+  --lm_ckpt "$LM_CKPT" \
+  --encodec_ckpt "$ENCODEC_CKPT" \
+  --lora_path "$LORA_PT" \
+  --out_dir "/home/audiocraft/outs_lora_gen" \
+  --seconds 12 \
+  --temperature 0.95 --top_p 0.9 --top_k 250 --seed 0 \
+  --prompts "calm ambient drones with soft pads" \
+            "bright plucked synth arpeggios, uplifting, 100 bpm, A minor"
