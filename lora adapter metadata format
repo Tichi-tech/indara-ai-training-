@@ -1,19 +1,1 @@
-Minimum fields (when you embed codes)
 
-wav (str, optional): path to the source audio relative to WAV_ROOT. Helpful for traceability.
-
-codes (list): the EnCodec token sequence.
-
-If you store one codebook: a flat list [t0, t1, ..., t{T-1}] (shape [T]).
-
-If you store all codebooks: a nested list with shape [K][T].
-
-sr (int, optional): sample rate (e.g., 32000).
-
-n_q or num_codebooks (int, optional): number of codebooks (e.g., 4).
-
-duration (float, optional): seconds.
-
-text or description (str, optional): prompt/caption (we pass an empty string when missing).
-
-In your run we set use_first_codebook_only=True, so the dataset expects codes as [T] (single codebook). If you give [K][T], the loader will take the first one. In the collate, we then tile that single stream to [B,K,T] and mask labels for codebooks 1..K-1.
