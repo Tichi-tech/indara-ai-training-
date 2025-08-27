@@ -42,12 +42,24 @@ python "/home/audiocraft/Stage-B traning 5 minutes music/rewrite_jsonl_codes_pat
   "/home/audiocraft/data/codes/v1_stageB" \
   --show_samples 8
 
-set path:
+traning script:
+/home/audiocraft/Stage-B traning 5 minutes music/train_stageB_lora.py
+run:
 export METADATA_DIR="/home/audiocraft/data/metadata_fixed/v1_stageB_pruned"
-export CODES_DIR="/home/audiocraft/data/codes/v1_stageB"
-export CODES_MANIFEST="$CODES_DIR/expected_codes_filenames.txt"
-export ENCODEC_CKPT="/home/audiocraft/saved_models/repacked_encodec.th"
+export ENCODEC_CKPT="/home/audiocraft/saved_models/repacked_encodec.th"   # not used here
 export LM_CKPT="/home/audiocraft/saved_models/transformer_epoch94/repacked_lm.th"
+
+python "/home/audiocraft/Stage-B traning 5 minutes music/train_stageB_lora.py" \
+  --train_jsonl "$METADATA_DIR/segments_stageB_minimal.jsonl" \
+  --val_jsonl   "$METADATA_DIR/segments_stageB_val.jsonl" \
+  --encodec_ckpt "$ENCODEC_CKPT" \
+  --lm_ckpt "$LM_CKPT" \
+  --out_dir "/home/audiocraft/saved_models/stageB_lora_smoke" \
+  --lora_r 8 --lora_alpha 16 --lora_dropout 0.05 \
+  --batch_size 12 --grad_accum 2 --lr 1e-4 --epochs 1 \
+  --max_steps 200 \
+  --lookback_f 300
+
 
 
 
