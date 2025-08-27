@@ -1,0 +1,248 @@
+Short answer: yes — this exact setup is reusable for your “old LoRA” dataset next time. It fixes the prompt issue because it:
+
+feeds real ConditioningAttributes from your metadata text,
+
+freezes the conditioner,
+
+and excludes cross-attention from LoRA (so base prompt semantics stay intact).
+
+Here’s how to apply it to that older run:
+
+What to do next time
+
+Use this trainer as-is with your dataset (train/val JSONL that point to *.codes.npz and include prompt text fields).
+
+Run a normal full training first (no extras). If prompt control is good, you’re done.
+
+If you want extra insurance against prompt drift:
+
+Lightweight: enable prompt dropout (classifier-free style) in the trainer (drop some prompts to "" during training).
+
+Stronger: add the optional null-prompt KL regularizer to match the base model on empty prompts. (Only needed if you notice prompt responsiveness dipping; you can also do a short “top-up” at the end.)
+
+If you want to fix the old adapter itself
+
+Two options:
+
+Resume it: load the old LoRA weights into the model and continue training with this new regimen (prompt dropout and/or KL). This “re-anchors” prompt behavior without starting over.
+
+Retrain clean: start from the base LM and train a fresh LoRA with this script; usually the most stable.
+
+Quick checklist (applies to both old & new runs)
+
+Metadata: most rows should have non-empty text/conditioning_text (or good synthesized prompts).
+
+Codes: K (num codebooks) and frame_rate=50 must match your EnCodec.
+
+LoRA scope: keep cross-attn/conditioner excluded from LoRA for prompt fidelity.
+
+Inference: use the same include/exclude setting you trained with.
+
+If you want, I can add a tiny --resume_lora <path> flag to your trainer so you can keep training an existing adapter with the improved settings.
+
+1) Prepare folders
+mkdir -p "/home/audiocraft/data/codes/old_lora"
+mkdir -p "/home/audiocraft/data/metadata_fixed/old_lora_pruned"
+mkdir -p "/home/audiocraft/saved_models/old_lora_runs"
+
+2) Convert your old JSONL to Stage-B format (codes → .codes.npz)
+
+Your old JSONL has inline codes arrays (plus text). Convert each record to a NPZ file and write a new JSONL that points to it via codes_path.
+
+Save as: /home/audiocraft/Stage-B traning 5 minutes music/old_lora_convert_to_codesnpz.py
+
+#!/usr/bin/env python3
+import os, json, argparse, pathlib, numpy as np
+
+def get_track_key(rec):
+    # Prefer a filename-like stem; fallback to hash
+    p = rec.get("path") or rec.get("wav_path") or rec.get("audio_path") or rec.get("id") or ""
+    stem = pathlib.Path(p).stem if p else ""
+    if stem: return stem
+    import hashlib
+    return "rec_" + hashlib.md5(json.dumps(rec, sort_keys=True).encode()).hexdigest()[:10]
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--in_jsonl", required=True)
+    ap.add_argument("--codes_out_root", required=True)
+    ap.add_argument("--meta_out_dir", required=True)
+    ap.add_argument("--val_ratio", type=float, default=0.12)
+    ap.add_argument("--frame_rate", type=int, default=50)  # 32kHz EnCodec → 50 fps
+    args = ap.parse_args()
+
+    os.makedirs(args.codes_out_root, exist_ok=True)
+    os.makedirs(args.meta_out_dir, exist_ok=True)
+
+    train_f = open(os.path.join(args.meta_out_dir, "train.jsonl"), "w")
+    val_f   = open(os.path.join(args.meta_out_dir, "val.jsonl"), "w")
+
+    import random; random.seed(1337)
+    n_ok = 0
+    with open(args.in_jsonl) as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            r = json.loads(line)
+
+            # old format: r["codes"] is list of K lists (each length T) or shape [K,T]
+            codes = r.get("codes")
+            if codes is None: continue
+            codes = np.asarray(codes, dtype=np.int64)
+            if codes.ndim == 1:
+                # If flattened, assume single codebook
+                codes = codes[None, :]
+            elif codes.shape[0] > codes.shape[1]:
+                # If transposed, try to fix to (K,T)
+                codes = codes.T
+
+            K, T = codes.shape
+            track_key = get_track_key(r)
+            npz_path = os.path.join(args.codes_out_root, f"{track_key}.codes.npz")
+            np.savez_compressed(npz_path, codes=codes, frame_rate=args.frame_rate)
+
+            # build Stage-B style row
+            text = (r.get("text") or r.get("conditioning_text") or "").strip()
+            row = {
+                "codes_path": npz_path,
+                "start_f": 0,
+                "end_f": int(T),
+                "text": text,
+                # keep extra tags if present (optional but useful for fallback)
+                "genre": r.get("genre"),
+                "moods": r.get("moods"),
+                "instrument": r.get("instrument"),
+                "keywords": r.get("keywords"),
+                "bpm": r.get("bpm"),
+                "key": r.get("key"),
+            }
+
+            # split
+            ((val_f if random.random() < args.val_ratio else train_f)
+             ).write(json.dumps(row, ensure_ascii=False) + "\n")
+            n_ok += 1
+
+    train_f.close(); val_f.close()
+    print(f"[ok] converted {n_ok} records")
+    print("[out] train.jsonl:", os.path.join(args.meta_out_dir, "train.jsonl"))
+    print("[out] val.jsonl  :", os.path.join(args.meta_out_dir, "val.jsonl"))
+
+if __name__ == "__main__":
+    main()
+
+
+Run it on your old JSONL (adjust path if different):
+
+python "/home/audiocraft/Stage-B traning 5 minutes music/old_lora_convert_to_codesnpz.py" \
+  --in_jsonl "/home/audiocraft/data/wavs/lora fine tune metadata/merged_metadata_680_with_codes.jsonl" \
+  --codes_out_root "/home/audiocraft/data/codes/old_lora" \
+  --meta_out_dir "/home/audiocraft/data/metadata_fixed/old_lora_pruned" \
+  --val_ratio 0.12 --frame_rate 50
+
+3) Sanity-check K and frame rate
+python - <<'PY'
+import json, numpy as np, glob
+paths = glob.glob("/home/audiocraft/data/codes/old_lora/*.codes.npz")[:5]
+for p in paths:
+    z = np.load(p); K,T = z["codes"].shape; fr = int(z["frame_rate"])
+    print(p, "K,T=",K,T, "fps=",fr, "seconds≈", T/float(fr))
+PY
+
+
+You want K=4 and fps=50 to match your LM/EnCodec setup.
+
+4) Train (baseline, same trainer you use now)
+
+Use the same script you’re training Stage-B with (it already feeds proper ConditioningAttributes).
+
+export LM_CKPT="/home/audiocraft/saved_models/transformer_epoch94/repacked_lm.th"
+export ENCODEC_CKPT="/home/audiocraft/saved_models/repacked_encodec.th"
+
+python "/home/audiocraft/Stage-B traning 5 minutes music/train_stageB_lora.py" \
+  --train_jsonl "/home/audiocraft/data/metadata_fixed/old_lora_pruned/train.jsonl" \
+  --val_jsonl   "/home/audiocraft/data/metadata_fixed/old_lora_pruned/val.jsonl" \
+  --encodec_ckpt "$ENCODEC_CKPT" \
+  --lm_ckpt "$LM_CKPT" \
+  --out_dir "/home/audiocraft/saved_models/old_lora_runs/baseline" \
+  --lora_r 8 --lora_alpha 16 --lora_dropout 0.05 \
+  --batch_size 12 --grad_accum 2 --lr 1e-4 \
+  --epochs 10 --max_steps 0 \
+  --lookback_f 300
+
+
+(This is your “clean baseline”—no extras. If prompt control sounds good, you’re done.)
+
+5) (Optional) Light boost to prompt-responsiveness
+
+If, after listening, prompts still steer weakly:
+
+5a) Classifier-free prompt dropout (tiny change, no teacher)
+
+Add this inside the training loop of your current script before building conditions:
+
+# B = tokens_bkl.size(0)
+use_null = torch.rand(tokens_bkl.size(0), device=device) < 0.3  # 30% nulls
+prompts_eff = [("" if use_null[i].item() else p) for i, p in enumerate(prompts)]
+conditions = build_conditions_from_prompts(prompts_eff)
+
+
+Then train a short continuation (e.g., 1–2 more epochs) into a new out_dir.
+
+5b) Null-prompt KL (stronger guardrail)
+
+If you decide to add it later, use the small patch I gave earlier (flags --null_prob and --kl_null_coef). Train a short “top-up” (e.g., 5–10k steps or 1–2 epochs).
+
+6) (Optional) Resume from your old adapter (continue training)
+
+If you want to fix an existing old adapter without starting over, add a tiny load-resume hook.
+
+Patch your trainer:
+
+In argparse:
+
+ap.add_argument("--resume_lora", type=str, default="", help="Path to existing LoRA .pt to load")
+
+
+After apply_lora(...) and before optimizer creation:
+
+def _load_lora_state(model, path):
+    import torch
+    payload = torch.load(path, map_location="cpu")
+    state = payload.get("lora_state") or payload
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    print(f"[resume] missing={len(missing)} unexpected={len(unexpected)} from {path}")
+
+if args.resume_lora:
+    _load_lora_state(lm, args.resume_lora)
+
+
+Run resume (with or without prompt-dropout/KL):
+
+python "/home/audiocraft/Stage-B traning 5 minutes music/train_stageB_lora.py" \
+  --train_jsonl "/home/audiocraft/data/metadata_fixed/old_lora_pruned/train.jsonl" \
+  --val_jsonl   "/home/audiocraft/data/metadata_fixed/old_lora_pruned/val.jsonl" \
+  --encodec_ckpt "$ENCODEC_CKPT" \
+  --lm_ckpt "$LM_CKPT" \
+  --out_dir "/home/audiocraft/saved_models/old_lora_runs/resumed" \
+  --resume_lora "/home/audiocraft/saved_models/old_adapter/lora_best.pt" \
+  --lora_r 8 --lora_alpha 16 --lora_dropout 0.05 \
+  --batch_size 12 --grad_accum 2 --lr 3e-5 \
+  --epochs 3 --max_steps 0 \
+  --lookback_f 300
+
+
+(Use a smaller LR like 3e-5 when resuming.)
+
+7) Generate & listen
+
+Use the test script I gave (test_stageB_lora_generate.py) with your best LoRA:
+
+export LORA_PT="/home/audiocraft/saved_models/old_lora_runs/baseline/lora_best.pt"  # or resumed
+python "/home/audiocraft/Stage-B traning 5 minutes music/test_stageB_lora_generate.py" \
+  --lm_ckpt "$LM_CKPT" \
+  --encodec_ckpt "$ENCODEC_CKPT" \
+  --lora_path "$LORA_PT" \
+  --out_dir "/home/audiocraft/outs_old_lora_gen" \
+  --seconds 12 --temperature 0.95 --top_p 0.9 --top_k 250 --seed 0 \
+  --prompts "calm ambient drones with soft pads" \
+            "bright plucked synth arpeggios, uplifting, 100 bpm, A minor"
