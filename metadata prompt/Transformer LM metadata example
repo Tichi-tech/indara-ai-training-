@@ -1,0 +1,12 @@
+{
+  "path": "piano-soundtrack-296767_chunk_1_0s-30s.wav",
+  "description": "Upbeat ambient pads with bright synthesizer ar...st yet calm movement, creating a peaceful and uplifting space.",
+  "genre": "nature sound",
+  "moods": ["calm", "peaceful", "happy", "uplifting"],
+  "keywords": ["synthesizer", "fast", "upbeat", "ambient", "classical"],
+  "instrument": "synthesizer",
+  "bpm": 176,
+  "key": "C# major",
+  "sample_rate": 32000,
+  "duration": 30
+}
