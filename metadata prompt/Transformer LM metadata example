@@ -1,12 +1,12 @@
 {
-  "path": "piano-soundtrack-296767_chunk_1_0s-30s.wav",
-  "description": "Upbeat ambient pads with bright synthesizer ar...st yet calm movement, creating a peaceful and uplifting space.",
-  "genre": "nature sound",
+  "path": "theta-binaural-waves-short-386124-meditation_chunk_1_0s-30s.wav",
+  "description": "Deep, sustained synthesizer drones with warm pads and subtle reverb; calm, peaceful ambience in D minor for uplifting and immersive deep meditation.",
+  "genre": "deep meditation",
   "moods": ["calm", "peaceful", "happy", "uplifting"],
-  "keywords": ["synthesizer", "fast", "upbeat", "ambient", "classical"],
+  "keywords": ["synthesizer", "slow", "ballad", "ambient", "classical"]
   "instrument": "synthesizer",
-  "bpm": 176,
-  "key": "C# major",
+  "bpm": 61,
+  "key": "D minor",
   "sample_rate": 32000,
   "duration": 30
 }
