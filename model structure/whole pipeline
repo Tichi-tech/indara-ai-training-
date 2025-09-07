@@ -1,0 +1,179 @@
+1) High-level flow
+
+User → Therapist AI (gpt-oss-20b) → “Therapy Plan” → Router → Music Engine (Indara 30s or Vendor 3–5m) → Music WAV
+↘ TTS Engine (SSML → Voice WAV)
+Mixing + Loudness → Final M4A → CDN
+
+2) Components
+
+• Therapist AI: gpt-oss-20b served behind an OpenAI-compatible endpoint, Harmony chat, single tool “gather_plan”.
+• Planner: maps the plan from the therapist into generator-ready controls.
+• Engine Router: chooses Indara-30s or Vendor-longform based on duration/engine hint.
+• Engine Adapters: translate the common plan into each engine’s expected inputs (tokens vs. vendor prompt/params).
+• TTS Adapter: sends SSML to provider (e.g., ElevenLabs) and returns a WAV.
+• Mixer: auto-ducks music under voice and normalizes loudness.
+• Storage/CDN: stores music.wav, voice.wav, final mix, waveform, and plan JSON; serves URLs to web/app.
+• API Gateway: one public contract; internal job orchestration for long tracks.
+• Observability & Safety: logging, metrics, rate limits, soft safety rules.
+
+3) Conversation & intake (Therapist AI)
+
+Goal: resolve in 3–4 short turns and return exactly one tool call.
+
+Inputs
+• User’s first message (e.g., “I want to calm down”).
+• System prompt (therapist tone, ≤4 turns, one tool call).
+• Tool schema (see “Therapy Plan” below).
+
+Process
+• Assistant asks 1 question per turn until it has minimal info.
+• Final assistant message triggers one tool call to gather all fields.
+
+Outputs: “Therapy Plan” (single object)
+A) Summary (1 sentence).
+B) Music controls (aligned to your metadata columns):
+– intent (calm_down, sleep, focus, release_stress, yoga, deep_meditation)
+– duration_sec (maps to duration)
+– bpm (int)
+– key_mode (e.g., F#MIN; maps to key)
+– genre (string; maps to genre)
+– moods (list; maps to moods)
+– keywords (list; maps to keywords)
+– instrument (list; maps to instrument)
+– sample_rate (default 32000 unless overridden)
+– optional: energy_curve (0.0–1.0 per section; if omitted, Planner supplies a default)
+C) TTS package:
+– script_ssml (ready for TTS)
+– voice_hint (e.g., calm_female_01)
+– target_lufs (default −19)
+D) NL description (1–2 sentences mirroring your “description” column for search/QA/future conditioning).
+
+4) Validation & defaults
+
+• Validate required fields; if any are missing, apply deterministic defaults:
+– bpm: from intent (calm 60–72; sleep 50–64; focus 70–100).
+– key_mode: minor for calm/sleep; major for energy/focus unless user preference.
+– genre/moods/instrument: small approved vocab to avoid drift.
+– duration_sec: snap to a multiple of 12 seconds.
+• Record all fallbacks in logs for later tuning.
+
+5) Planning (map to engine-ready plans)
+
+Two internal plans are produced from the same Therapy Plan.
+
+A) Composer Plan (for Indara 30s; Stage-B tokens)
+• Segment the requested duration into 12-second bins.
+• For each bin:
+– POS: START, MID, END
+– POS_BIN: 00..NN
+– BPM: zero-padded int (e.g., 066)
+– KEY: key_mode (e.g., F#MIN)
+– ENERGY: from energy_curve or default ramp (intro down, stable body, soft outro)
+– SEC: AUTO_INTRO / AUTO_BODY / AUTO_OUTRO
+– FR token: fixed to your training frame rate (e.g., 50HZ_NQ4)
+• Output: segments list + notes (intent, moods, instruments).
+
+B) Vendor Prompt Plan (for 3–5 min engine)
+• Build a clean prompt from the same fields: intent, bpm, key, genre, moods, instruments, keywords, structure cues (intro/body/outro).
+• Include duration, steadiness of tempo/tonality, “no vocals”, dynamic smoothness.
+• Add vendor-specific parameters (seed, style presets) if applicable.
+
+6) Routing logic (single public API)
+
+• One public “compose” endpoint.
+• If engine parameter is passed: honor it.
+• Else choose by duration: ≤45 s → Indara-30s; ≥3 min → Vendor.
+• Long tracks are jobs (async): return job_id and status=processing; short tracks can be synchronous.
+
+7) Music generation
+
+• Indara-30s engine receives the Composer Plan (Stage-B segments) and returns music.wav at the requested sample rate.
+• Vendor engine receives the Vendor Prompt Plan and returns music.wav.
+
+8) Voice generation (TTS)
+
+• Use script_ssml and voice_hint; request WAV output.
+• Cache TTS segments by hash(text + voice) to reduce cost for repeated lines.
+• If TTS fails, retry once with slightly simplified SSML; on second failure, return music-only session with a helpful notice.
+
+9) Mixing & loudness
+
+• Resample both music and voice to a common format (mono, 32 kHz).
+• Sidechain-duck music under voice (roughly −10 to −12 dB while speaking; gentle attack/release).
+• Normalize final program loudness to −19 LUFS (mono), true peak around −1 dBFS.
+• Export: WAV master and AAC M4A (96–128 kbps) for delivery.
+• Optional: package HLS for instant start and scrubbing.
+
+10) Persistence & delivery
+
+• Store per session:
+– therapy_summary (one sentence)
+– therapy_plan (full object)
+– composer_plan (segments) and/or vendor_prompt_plan
+– URLs: music.wav, tts.wav, mix.m4a, waveform.json
+– engine and engine_version used
+– metrics (turns to completion, schema pass, retries).
+• Upload assets to S3/Supabase; set Cache-Control headers; return signed or public URLs to web/app.
+
+11) Analytics & quality loop
+
+• Product metrics: completion rate ≤4 turns, tool-call schema pass rate, re-generate rate, drop-off after turn 1.
+• Audio metrics: LUFS, peak, ducking depth distribution, speech intelligibility complaints.
+• Vendor vs. Indara costs and latency.
+• A/B: alternative energy curves, genre/instrument presets, SSML phrasings.
+• Weekly review: top intents, common avoidances, frequent defaults triggered (to tighten prompts).
+
+12) Safety & tone
+
+• System prompt enforces warm, supportive, non-clinical tone; no medical claims; crisis guidance (“seek professional help”).
+• Blockwords/filters for self-harm or acute crisis; provide resources.
+• Log moderation decisions; allow human override for flagged sessions.
+
+13) Versioning & rollbacks
+
+• Tag every release: therapist_prompt@date, tool_schema@version, indara-30s@model_id, vendor@version.
+• Store the exact plan and adapter parameters with each asset for reproducibility.
+• Blue/green deploy: switch engine versions behind the adapter without frontend changes.
+
+14) Cost & latency controls
+
+• Cache TTS phrases; cache popular 30-second beds for common intents.
+• Set sensible max durations per tier; pre-warm vendor engines at open hours.
+• Rate limit per user; backoff/retry policies per engine.
+
+15) Fallbacks & graceful degradation
+
+• Vendor timeout: auto-generate a high-quality 60–90 s loop (two crossfaded 30 s chunks) and deliver immediately; notify user when longform is ready.
+• Missing fields: fill deterministic defaults; never fail the session for optional fields.
+• TTS down: deliver music-only with on-screen guided text.
+
+16) Data model (storage sketch)
+
+• sessions (id, user_id, created_at, status, intent, engine, engine_version)
+• therapy_plan (session_id, json)
+• composer_plan / vendor_plan (session_id, json)
+• assets (session_id, music_url, tts_url, mix_url, waveform_url, lufs)
+• analytics (session_id, turns_to_complete, schema_pass, retries, costs)
+
+17) Deployment topology
+
+• Public API gateway (HTTPS, auth, rate limiting).
+• Therapist service (calls gpt-oss-20b).
+• Planner + Router (stateless; can scale horizontally).
+• Engines:
+– musician-30s (Indara) service
+– vendor bridge service
+• TTS service adapter
+• Mixer worker (can be in the same pod as engines or a separate job worker)
+• Object storage + CDN
+• Metrics + logs stack (APM and audio QA dashboards)
+
+18) What to finalize before go-live
+
+• System prompt and the single tool schema.
+• Approved vocab for genre/moods/instruments/keywords.
+• Default mappings per intent (bpm/key/energy curve).
+• Engine routing rules and timeouts.
+• Loudness and ducking targets.
+• Safety copy for the therapist.
+• Success criteria for the first cohort (e.g., ≥90% schema pass; ≥80% completion ≤4 turns; <10% re-generate).
