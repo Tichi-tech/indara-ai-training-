@@ -1,0 +1,423 @@
+"""
+Indara Core Service (Architecture-first, plug-in ports left for models)
+
+Purpose
+-------
+Single service exposing two public endpoints:
+  • POST /compose/music   – Text → Healing Music (music only)
+  • POST /compose/session – Text → Meditation Session (music + TTS)
+
+Routing
+-------
+• 30s  → Indara-30s engine (your Stage-B model)  → synchronous by default
+• 3m/5m → Vendor engine (longform)               → async job (poll /jobs/{id})
+• Optional engine override honored.
+
+External model ports (leave these as-is; set via env or config)
+--------------------------------------------------------------
+THERAPIST_BASE_URL  : OpenAI-compatible chat server for gpt-oss-20b (e.g., vLLM at http://THERAPIST_HOST:8000/v1)
+THERAPIST_API_KEY   : API key if required by your gateway (optional)
+INDARA_ENGINE_URL   : Your 30s musician model (e.g., http://musician-30s:8080/generate)
+VENDOR_3M_URL       : Vendor 3-minute engine (e.g., http://vendor-3m:8081/generate)
+VENDOR_5M_URL       : Vendor 5-minute engine (e.g., http://vendor-5m:8082/generate)
+TTS_BASE_URL        : Text-to-speech API (e.g., ElevenLabs) base
+TTS_API_KEY         : TTS API key
+STORAGE_BASE        : Where to store/serve assets (e.g., s3://bucket or https://cdn.example.com)
+
+Notes
+-----
+• This file focuses on the core orchestration. Model calls are stubs with TODOs where you will connect real APIs.
+• Mixing uses an ffmpeg command (string assembled), but execution is left as a TODO.
+• Replace placeholders with production clients (S3, ffmpeg invocation, actual HTTP calls).
+"""
+
+from __future__ import annotations
+
+import enum
+import json
+import os
+import time
+import uuid
+import logging
+from typing import List, Optional, Literal, Dict, Any
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, validator
+
+# ------------------------------------------------------------
+# Configuration (ports to external systems)
+# ------------------------------------------------------------
+
+THERAPIST_BASE_URL = os.getenv("THERAPIST_BASE_URL", "http://THERAPIST_HOST:8000/v1")  # OpenAI-style endpoint
+THERAPIST_API_KEY  = os.getenv("THERAPIST_API_KEY", "")
+INDARA_ENGINE_URL  = os.getenv("INDARA_ENGINE_URL", "http://musician-30s:8080/generate")
+VENDOR_3M_URL      = os.getenv("VENDOR_3M_URL", "http://vendor-3m:8081/generate")
+VENDOR_5M_URL      = os.getenv("VENDOR_5M_URL", "http://vendor-5m:8082/generate")
+TTS_BASE_URL       = os.getenv("TTS_BASE_URL", "https://api.tts-provider.example")
+TTS_API_KEY        = os.getenv("TTS_API_KEY", "")
+STORAGE_BASE       = os.getenv("STORAGE_BASE", "https://cdn.example.com/indara/")
+
+# ------------------------------------------------------------
+# Schemas (requests / plans / responses)
+# ------------------------------------------------------------
+
+class EngineChoice(str, enum.Enum):
+    auto = "auto"
+    indara_30s = "indara-30s"
+    vendor_3m = "vendor-3m"
+    vendor_5m = "vendor-5m"
+
+class MusicHints(BaseModel):
+    bpm: Optional[int] = None
+    key_mode: Optional[str] = None  # e.g., "F#MIN"
+    genre: Optional[str] = None
+    moods: Optional[List[str]] = None
+    instrument: Optional[List[str]] = None
+    keywords: Optional[List[str]] = None
+    avoidances: Optional[List[str]] = None  # e.g., ["no_vocals"]
+
+class TTSOptions(BaseModel):
+    voice_hint: Optional[str] = None
+    target_lufs: Optional[float] = Field(default=-19.0)
+
+class ComposeBase(BaseModel):
+    user_text: str
+    duration_sec: Literal[30, 180, 300]
+    hints: Optional[MusicHints] = None
+    engine: EngineChoice = EngineChoice.auto
+
+class ComposeMusicRequest(ComposeBase):
+    pass
+
+class ComposeSessionRequest(ComposeBase):
+    tts: Optional[TTSOptions] = None
+
+# --- Therapist output (Therapy Plan) ---
+class MusicPlan(BaseModel):
+    intent: Literal["calm_down","sleep","focus","release_stress","yoga","deep_meditation"]
+    duration_sec: int
+    bpm: int
+    key_mode: str
+    genre: Optional[str] = None
+    moods: Optional[List[str]] = None
+    instrument: Optional[List[str]] = None
+    keywords: Optional[List[str]] = None
+    sample_rate: int = 32000
+    energy_curve: Optional[List[float]] = None  # 0.0–1.0 per section
+
+class TTSPlan(BaseModel):
+    script_ssml: Optional[str] = None
+    voice_hint: Optional[str] = None
+    target_lufs: float = -19.0
+
+class TherapyPlan(BaseModel):
+    summary: str
+    music: MusicPlan
+    tts: Optional[TTSPlan] = None
+    nl_description: Optional[str] = None
+
+# --- Engine-specific plans ---
+class Segment(BaseModel):
+    start_f: int
+    end_f: int
+    lookback_f: int = 0
+    plan_tokens: List[str]
+    mask_policy: str = "loss_on_current_only"
+    split: str = "gen"
+
+class ComposerPlan(BaseModel):
+    schema: Dict[str, Any]
+    track_id: str
+    codes_path: Optional[str] = None
+    segments: List[Segment]
+    notes: Dict[str, Any]
+
+# --- Responses ---
+class ComposeProcessingResponse(BaseModel):
+    job_id: str
+    status: Literal["processing"] = "processing"
+    engine: EngineChoice
+
+class ComposeMusicDoneResponse(BaseModel):
+    status: Literal["done","ok"] = "done"
+    engine: EngineChoice
+    music_url: str
+    plan: Dict[str, Any]
+    nl_description: Optional[str] = None
+
+class ComposeSessionDoneResponse(ComposeMusicDoneResponse):
+    tts_url: Optional[str] = None
+    mix_url: Optional[str] = None
+    lufs: Optional[float] = None
+
+# ------------------------------------------------------------
+# Utilities
+# ------------------------------------------------------------
+
+def new_job_id() -> str:
+    return f"j_{uuid.uuid4().hex[:12]}"
+
+# ------------------------------------------------------------
+# Clients (Therapist / Engines / TTS / Storage)
+# ------------------------------------------------------------
+
+class TherapistClient:
+    """Port to gpt-oss-20b served via OpenAI-compatible API.
+    TODO: Implement real HTTP call to {THERAPIST_BASE_URL}/chat/completions with tool schema.
+    """
+    def generate_plan(self, user_text: str, duration_sec: int, hints: Optional[MusicHints], include_tts: bool) -> TherapyPlan:
+        # STEP 1: Build messages + tools; STEP 2: POST to chat/completions; STEP 3: parse tool_call
+        # For now, return a deterministic stub aligned to the schema.
+        bpm_default = 66 if duration_sec in (180,300) else 70
+        plan = TherapyPlan(
+            summary="User seeks calm; evening unwind.",
+            music=MusicPlan(
+                intent="calm_down",
+                duration_sec=duration_sec,
+                bpm=hints.bpm if hints and hints.bpm else bpm_default,
+                key_mode=hints.key_mode if hints and hints.key_mode else "D#MIN",
+                genre=hints.genre if hints and hints.genre else "ambient_healing",
+                moods=hints.moods or ["peaceful","soothing"],
+                instrument=hints.instrument or ["piano","pads","rain"],
+                keywords=hints.keywords or ["soft piano","rain ambience"],
+                sample_rate=32000,
+                energy_curve=None,
+            ),
+            tts=TTSPlan(
+                script_ssml=(
+                    "<speak><prosody rate=\"85%\">Welcome. Notice your breath."
+                    "<break time=\"1.2s\"/>Let the shoulders soften.</prosody></speak>"
+                ) if include_tts else None,
+                voice_hint="calm_female_01" if include_tts else None,
+                target_lufs=-19.0,
+            ) if include_tts else None,
+            nl_description=(
+                "Soft ambient healing piece with gentle piano and warm pads over distant rain; steady tempo for calm."
+            ),
+        )
+        return plan
+
+class IndaraEngineClient:
+    """Port to your 30s musician engine.
+    TODO: POST ComposerPlan to INDARA_ENGINE_URL and receive WAV (or URL).
+    """
+    def generate_music(self, composer_plan: ComposerPlan) -> str:
+        # Return a placeholder URL/path to the generated WAV
+        return STORAGE_BASE + "audio/placeholder_indara_music.wav"
+
+class VendorEngineClient:
+    """Port to vendor 3m/5m engine.
+    TODO: POST prompt/params to VENDOR_{3M,5M}_URL and receive WAV (or URL).
+    """
+    def generate_music(self, prompt: str, duration_sec: int) -> str:
+        return STORAGE_BASE + "audio/placeholder_vendor_music.wav"
+
+class TTSClient:
+    """Port to TTS provider (e.g., ElevenLabs).
+    TODO: POST SSML to TTS_BASE_URL and receive WAV (or URL).
+    """
+    def synthesize(self, tts_plan: TTSPlan) -> str:
+        if not tts_plan or not tts_plan.script_ssml:
+            raise ValueError("TTS plan missing SSML")
+        return STORAGE_BASE + "audio/placeholder_voice.wav"
+
+class Mixer:
+    """Audio mixing and loudness normalization.
+    TODO: Execute ffmpeg sidechaincompress + loudnorm; upload outputs; compute LUFS.
+    """
+    def mix_and_normalize(self, music_url: str, voice_url: str, target_lufs: float = -19.0) -> tuple[str, float]:
+        # In production, download inputs, run ffmpeg, upload result. Return mix_url and measured LUFS.
+        mix_url = STORAGE_BASE + "audio/placeholder_mix.m4a"
+        return mix_url, target_lufs
+
+# ------------------------------------------------------------
+# Planner (map Therapy Plan → engine-specific payloads)
+# ------------------------------------------------------------
+
+def to_composer_plan(music: MusicPlan) -> ComposerPlan:
+    bins = max(1, music.duration_sec // 12)
+    # Basic energy curve: intro↓ → low/stable → soft outro
+    default_curve = [0.25] + [0.20] * (bins - 2 if bins > 2 else 0) + ([0.22] if bins > 1 else [])
+    curve = music.energy_curve or default_curve
+    # Pad/trim curve to bins
+    if len(curve) < bins:
+        curve = (curve * ((bins // len(curve)) + 1))[:bins]
+    else:
+        curve = curve[:bins]
+
+    segments: List[Segment] = []
+    for i in range(bins):
+        pos = "START" if i == 0 else ("END" if i == bins - 1 else "MID")
+        sec = "AUTO_INTRO" if i == 0 else ("AUTO_OUTRO" if i == bins - 1 else "AUTO_BODY")
+        tokens = [
+            "[FR=50HZ_NQ4]",
+            f"[POS={pos}]",
+            f"[POS_BIN={i:02d}]",
+            f"[BPM={int(music.bpm):03d}]",
+            f"[KEY={music.key_mode}]",
+            f"[ENERGY={curve[i]:.2f}]",
+            f"[SEC={sec}]",
+        ]
+        segments.append(Segment(start_f=i*600, end_f=(i+1)*600, plan_tokens=tokens))
+
+    plan = ComposerPlan(
+        schema={"manifest": "segments", "version": "1.0"},
+        track_id=f"trk-{uuid.uuid4().hex[:12]}",
+        codes_path=None,
+        segments=segments,
+        notes={
+            "intent": music.intent,
+            "genre": music.genre,
+            "moods": music.moods,
+            "instrument": music.instrument,
+            "keywords": music.keywords,
+            "sample_rate": music.sample_rate,
+        },
+    )
+    return plan
+
+
+def to_vendor_prompt(music: MusicPlan) -> str:
+    parts = [
+        f"Ambient healing piece, BPM {music.bpm}, key {music.key_mode}.",
+        f"Moods: {', '.join(music.moods or [])}." if music.moods else "",
+        f"Instruments: {', '.join(music.instrument or [])}." if music.instrument else "",
+        f"Keywords: {', '.join(music.keywords or [])}." if music.keywords else "",
+        "Structure: 30s intro (very low energy), stable body, gentle outro.",
+        "Avoid vocals. Smooth dynamics; no sharp transients.",
+    ]
+    return " ".join([p for p in parts if p])
+
+# ------------------------------------------------------------
+# Job manager (simple in-memory placeholder)
+# ------------------------------------------------------------
+
+class JobStore:
+    def __init__(self):
+        self._data: Dict[str, Dict[str, Any]] = {}
+
+    def create(self, engine: EngineChoice) -> str:
+        jid = new_job_id()
+        self._data[jid] = {"status": "processing", "engine": engine, "result": None}
+        return jid
+
+    def complete(self, jid: str, result: Dict[str, Any]):
+        if jid in self._data:
+            self._data[jid]["status"] = "done"
+            self._data[jid]["result"] = result
+
+    def get(self, jid: str) -> Dict[str, Any]:
+        if jid not in self._data:
+            raise KeyError(jid)
+        return self._data[jid]
+
+JOBS = JobStore()
+
+# ------------------------------------------------------------
+# Engine selection
+# ------------------------------------------------------------
+
+def choose_engine(duration_sec: int, override: EngineChoice) -> EngineChoice:
+    if override != EngineChoice.auto:
+        return override
+    if duration_sec == 30:
+        return EngineChoice.indara_30s
+    if duration_sec == 180:
+        return EngineChoice.vendor_3m
+    if duration_sec == 300:
+        return EngineChoice.vendor_5m
+    return EngineChoice.indara_30s
+
+# ------------------------------------------------------------
+# FastAPI app and endpoints
+# ------------------------------------------------------------
+
+app = FastAPI(title="Indara Core Service", version="0.1.0")
+
+THERAPIST = TherapistClient()
+INDARA   = IndaraEngineClient()
+VENDOR   = VendorEngineClient()
+TTS      = TTSClient()
+MIXER    = Mixer()
+
+@app.post("/compose/music", response_model=ComposeMusicDoneResponse | ComposeProcessingResponse)
+def compose_music(req: ComposeMusicRequest):
+    engine = choose_engine(req.duration_sec, req.engine)
+
+    # STEP 1: Intake → Therapy Plan (we'll ignore TTS for music-only)
+    plan = THERAPIST.generate_plan(req.user_text, req.duration_sec, req.hints, include_tts=False)
+
+    # STEP 2: Route to engine
+    if engine == EngineChoice.indara_30s:
+        # Synchronous path
+        composer_plan = to_composer_plan(plan.music)
+        music_url = INDARA.generate_music(composer_plan)
+        return ComposeMusicDoneResponse(
+            status="ok", engine=engine, music_url=music_url,
+            plan=json.loads(composer_plan.model_dump_json()),
+            nl_description=plan.nl_description,
+        )
+    else:
+        # Async job path for 3m/5m
+        jid = JOBS.create(engine)
+        # NOTE: In production, enqueue background work. Here we immediately synthesize placeholders.
+        prompt = to_vendor_prompt(plan.music)
+        music_url = VENDOR.generate_music(prompt, req.duration_sec)
+        result = ComposeMusicDoneResponse(
+            status="done", engine=engine, music_url=music_url,
+            plan={"vendor_prompt": prompt, "duration_sec": req.duration_sec},
+            nl_description=plan.nl_description,
+        ).model_dump()
+        JOBS.complete(jid, result)
+        return ComposeProcessingResponse(job_id=jid, engine=engine)
+
+@app.post("/compose/session", response_model=ComposeSessionDoneResponse | ComposeProcessingResponse)
+def compose_session(req: ComposeSessionRequest):
+    engine = choose_engine(req.duration_sec, req.engine)
+
+    # STEP 1: Intake → Therapy Plan (include TTS)
+    plan = THERAPIST.generate_plan(req.user_text, req.duration_sec, req.hints, include_tts=True)
+    # Override voice/loudness if provided
+    if req.tts:
+        if plan.tts is None:
+            plan.tts = TTSPlan()
+        if req.tts.voice_hint:
+            plan.tts.voice_hint = req.tts.voice_hint
+        if req.tts.target_lufs is not None:
+            plan.tts.target_lufs = req.tts.target_lufs
+
+    if engine == EngineChoice.indara_30s:
+        # Synchronous 30s session
+        composer_plan = to_composer_plan(plan.music)
+        music_url = INDARA.generate_music(composer_plan)
+        voice_url = TTS.synthesize(plan.tts or TTSPlan(script_ssml="<speak/>"))
+        mix_url, lufs = MIXER.mix_and_normalize(music_url, voice_url, plan.tts.target_lufs if plan.tts else -19.0)
+        return ComposeSessionDoneResponse(
+            status="ok", engine=engine, music_url=music_url, tts_url=voice_url, mix_url=mix_url, lufs=lufs,
+            plan=json.loads(composer_plan.model_dump_json()), nl_description=plan.nl_description,
+        )
+    else:
+        # Async 3m/5m session
+        jid = JOBS.create(engine)
+        prompt = to_vendor_prompt(plan.music)
+        music_url = VENDOR.generate_music(prompt, req.duration_sec)
+        voice_url = TTS.synthesize(plan.tts or TTSPlan(script_ssml="<speak/>"))
+        mix_url, lufs = MIXER.mix_and_normalize(music_url, voice_url, plan.tts.target_lufs if plan.tts else -19.0)
+        result = ComposeSessionDoneResponse(
+            status="done", engine=engine, music_url=music_url, tts_url=voice_url, mix_url=mix_url, lufs=lufs,
+            plan={"vendor_prompt": prompt, "duration_sec": req.duration_sec}, nl_description=plan.nl_description,
+        ).model_dump()
+        JOBS.complete(jid, result)
+        return ComposeProcessingResponse(job_id=jid, engine=engine)
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    try:
+        data = JOBS.get(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found")
+    return data
+
+@app.get("/health")
+def health():
+    return {"ok": True, "therapist": bool(THERAPIST_BASE_URL), "indara": bool(INDARA_ENGINE_URL), "tts": bool(TTS_BASE_URL)}
