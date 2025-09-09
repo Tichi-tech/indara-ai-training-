@@ -1,0 +1,31 @@
+EnCodec Training
+
+Training config (your workaround config):
+
+/home/audiocraft/conf/compression/encodec_custom_32khz.yaml
+
+
+Checkpoints (rolling):
+
+/home/audiocraft/saved_models/encodec/ckpts/
+
+
+Forced resume checkpoint at epoch 25 (your workaround):
+
+/home/audiocraft/saved_models/encodec_force_epoch25.th
+
+
+Repacked checkpoint for inference (after training):
+
+/home/audiocraft/saved_models/repacked_encodec.th
+
+
+Manifests (for Dora/Audiocraft training):
+
+/home/audiocraft/data/train.json
+/home/audiocraft/data/valid.json
+
+
+Raw audio (resampled to 32kHz mono):
+
+/home/audiocraft/data/wavs_32k/
