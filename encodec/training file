@@ -42,3 +42,8 @@ python -m audiocraft.train \
 python -m audiocraft.train \
   solver=compression/encodec_custom_32khz_v2 \
   datasource.generate=null
+
+new solution: 
+path: /home/audiocraft/scripts/train_encodec_v2_single.sh
+command: export DESC='+xp.description="encodec_v2_single"'
+/home/audiocraft/scripts/train_encodec_v2_single.sh
