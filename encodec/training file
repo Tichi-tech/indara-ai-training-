@@ -2,7 +2,7 @@ EnCodec Training
 
 Training config (your workaround config):
 
-/home/audiocraft/conf/compression/encodec_custom_32khz.yaml
+/home/audiocraft/config/solver/compression/encodec_custom_32khz_v2.yaml
 
 
 Checkpoints (rolling):
@@ -29,3 +29,16 @@ Manifests (for Dora/Audiocraft training):
 Raw audio (resampled to 32kHz mono):
 
 /home/audiocraft/data/wavs_32k/
+
+command:
+cd /home/audiocraft
+export USER=root OMP_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false HYDRA_FULL_ERROR=1
+
+python -m audiocraft.train \
+  solver=compression/encodec_custom_32khz_v2 \
+  datasource.generate=null \
+  show=true
+
+python -m audiocraft.train \
+  solver=compression/encodec_custom_32khz_v2 \
+  datasource.generate=null
