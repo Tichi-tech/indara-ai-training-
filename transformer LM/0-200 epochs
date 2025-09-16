@@ -1,0 +1,97 @@
+# @package _global_
+
+defaults:
+  - musicgen/default
+  - /model: lm/musicgen_lm
+  - override /model/lm/model_scale: medium 
+  - override /conditioner: text2music
+  - override /dset: audio/default
+  - _self_
+
+# MANDATORY FIELDS
+solver: musicgen
+sample_rate: 32000
+channels: 1
+compression_model_checkpoint: /home/audiocraft/saved_models/encodec_v2/encodec_best_epoch193.th
+
+# Language model type
+lm_model: transformer_lm
+
+# Codebooks pattern configuration
+codebooks_pattern:
+  modeling: delay
+  delay:
+    delays: [0, 1, 2, 3]
+    flatten_first: 0
+    empty_initial: 0
+
+# Classifier-free guidance configuration
+classifier_free_guidance:
+  training_dropout: 0.1
+  inference_coef: 3.0
+
+# Attribute dropout configuration
+attribute_dropout:
+  text:
+    description: 0.3
+
+# Fuser configuration - how to combine conditioning
+fuser:
+  cross_attention_pos_emb: false
+  cross_attention_pos_emb_scale: 1
+  sum: []
+  prepend: []
+  cross: [description]
+  input_interpolate: []
+
+# Conditioners configuration
+conditioners:
+  description:
+    model: t5
+    t5:
+      name: t5-base
+      finetune: false
+      word_dropout: 0.3
+      normalize_text: false
+
+# Model architecture
+transformer_lm:
+  n_q: 4
+  card: 2048
+  memory_efficient: true
+
+# Dataset paths
+datasource:
+  train: /home/audiocraft/data/manifests_v2/train_info.jsonl
+  valid: /home/audiocraft/data/manifests_v2/valid_info.jsonl
+  evaluate: /home/audiocraft/data/manifests_v2/valid_info.jsonl
+  generate: /home/audiocraft/data/manifests_v2/generate_small.jsonl
+  max_channels: 1
+  max_sample_rate: 32000
+
+dset:
+  train: /home/audiocraft/data/manifests_v2/train_info.jsonl
+  valid: /home/audiocraft/data/manifests_v2/valid_info.jsonl
+  evaluate: /home/audiocraft/data/manifests_v2/valid_info.jsonl
+  generate: /home/audiocraft/data/manifests_v2/generate_small.jsonl
+  max_channels: 1
+  max_sample_rate: 32000
+
+# Training settings
+dataset:
+  batch_size: 4
+  num_workers: 4
+  segment_duration: 30
+
+optim:
+  epochs: 400
+  updates_per_epoch: 200
+  lr: 3e-5
+
+# Generation settings
+generate:
+  every: 0
+  lm:
+    use_sampling: true
+    top_k: 250
+    top_p: 0.0
