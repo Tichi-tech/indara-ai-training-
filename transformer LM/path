@@ -1,0 +1,2 @@
+/home/audiocraft/config/solver/musicgen/musicgen_v2_large.yaml
+dora run -d solver=musicgen/musicgen_v2_large
