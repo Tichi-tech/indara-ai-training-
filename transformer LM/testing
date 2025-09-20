@@ -12,3 +12,15 @@ python /home/audiocraft/scripts/lm_test_fixed.py \
       "calm ambient drones with peaceful harmonies and subtle movement for meditation" \
       "soft electronic texture with gentle pulses and long sustains for sleep" \
       "ethereal synthesizer layers with quiet arpeggios and soothing tones for evening calm"
+
+  python /home/audiocraft/scripts/lm_test_fixed.py \
+    --lm_ckpt /home/audiocraft/saved_models/transformer_v2/xps/e4d3d3dc/repacked_lm_500.th \
+    --encodec_ckpt /home/audiocraft/saved_models/encodec_v2/repacked_encodec_epoch193.th \
+    --outdir /home/audiocraft/gen_test_exact_params \
+    --duration 30 \
+    --cfg_coef 3.0 \
+    --top_k 250 \
+    --temperature 1.0 \
+    --prompts \
+      "Deep, sustained synthesizer drones with soft pads and long decays; calm, introspective
+  texture for peaceful deep meditation"
