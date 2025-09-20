@@ -1,1 +1,14 @@
 /home/audiocraft/scripts/lm_test_fixed.py
+
+python /home/audiocraft/scripts/lm_test_fixed.py \
+    --lm_ckpt /home/audiocraft/saved_models/transformer_v2/xps/e4d3d3dc/repacked_lm_500.th \
+    --encodec_ckpt /home/audiocraft/saved_models/encodec_v2/repacked_encodec_epoch193.th \
+    --outdir /home/audiocraft/gen_relaxation_music \
+    --duration 30 \
+    --cfg_coef 2.5 \
+    --top_k 180 \
+    --prompts \
+      "gentle synthesizer pads with soft reverb and slow decay for morning relaxation" \
+      "calm ambient drones with peaceful harmonies and subtle movement for meditation" \
+      "soft electronic texture with gentle pulses and long sustains for sleep" \
+      "ethereal synthesizer layers with quiet arpeggios and soothing tones for evening calm"
