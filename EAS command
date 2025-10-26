@@ -1,0 +1,5 @@
+  # Build
+  npx eas-cli build --platform ios --profile production --non-interactive
+
+  # Then submit after build completes
+  npx eas-cli submit --platform ios --profile production
